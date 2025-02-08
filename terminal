@@ -1,0 +1,167 @@
+# Configurar git con tu información
+git config --global user.email "lmrojasramirez@gmail.com"
+git config --global user.name "lmrojas"
+
+# Inicializar repositorio
+git init
+
+# Agregar todos los archivos excepto el entorno virtual y archivos sensibles
+git add .
+git reset -- venv/
+git reset -- .env
+
+# Crear .gitignore para excluir archivos que no deben versionarse
+echo "venv/
+.env
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/" > .gitignore
+
+# Agregar el .gitignore
+git add .gitignore
+
+# Crear el commit inicial
+git commit -m "feat: initial commit
+
+- Project structure setup
+- Documentation added
+- MDC rules defined
+- Virtual environment configured"
+
+# Configurar el repositorio remoto con tu URL específica
+git remote add origin https://github.com/lmrojas/admin_kiosk3.git
+
+# Hacer el push inicial
+git push -u origin main
+
+# Hacer backup del archivo específico
+cp Admin_Kiosk3_Backend/kiosk_service/config.py Admin_Kiosk3_Backend/kiosk_service/config.py.backup
+
+# Agregar el archivo original a git
+git add Admin_Kiosk3_Backend/kiosk_service/config.py
+
+# Crear commit con mensaje descriptivo
+git commit -m "feat(kiosk): add kiosk service configuration
+
+- Add base configuration for kiosk service
+- Include service name and port settings
+- Configure kiosk-specific timeouts"
+
+# Push al repositorio
+git push origin main
+
+# Crear la base de datos
+psql -U postgres -c "CREATE DATABASE admin_kiosk3 WITH ENCODING='UTF8' LC_COLLATE='en_US.UTF-8' LC_CTYPE='en_US.UTF-8' TEMPLATE=template0;"
+
+# Crear el usuario si no existe
+psql -U postgres -c "CREATE USER admin_kiosk3_user WITH PASSWORD 'secure_password';"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE admin_kiosk3 TO admin_kiosk3_user;"
+
+echo "DATABASE_URL=postgresql://admin_kiosk3_user:secure_password@localhost:5432/admin_kiosk3
+FLASK_ENV=development
+FLASK_APP=app.py
+JWT_SECRET_KEY=$(openssl rand -hex 32)" > .env
+
+ls
+git status 
+
+psql -U postgres -d admin_kiosk3 -c "CREATE EXTENSION IF NOT EXISTS pgaudit;"
+psql -U postgres -d admin_kiosk3 -c "REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;"
+psql -U postgres -d admin_kiosk3 -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO admin_kiosk3_user;"
+
+# Verificar dependencias actuales
+pip freeze
+
+# Instalar las dependencias necesarias una por una
+pip install Flask-SQLAlchemy
+pip install psycopg2-binary
+pip install python-dotenv
+pip install Flask-JWT-Extended
+pip install bcrypt
+pip install python-json-logger
+pip install gunicorn
+pip install eventlet
+pip install alembic
+pip install PyYAML
+pip install cryptography
+
+# Verificar todas las dependencias instaladas
+pip freeze
+
+# Guardar en requirements.txt
+pip freeze > requirements.txt
+
+# Agregar requirements.txt a git
+git add requirements.txt
+git commit -m "build: add project dependencies
+
+- Add database dependencies (SQLAlchemy, psycopg2)
+- Add security dependencies (JWT, bcrypt)
+- Add logging and configuration dependencies
+- Add server dependencies (gunicorn, eventlet)"
+git push origin main 
+
+# Crear directorio de migraciones
+mkdir -p Admin_Kiosk3_Backend/kiosk_service/migrations
+
+# Movernos al directorio del servicio
+cd Admin_Kiosk3_Backend/kiosk_service
+
+# Inicializar Alembic
+alembic init migrations
+
+# Configurar alembic.ini con la URL de la base de datos
+sed -i 's|sqlalchemy.url = driver://user:pass@localhost/dbname|sqlalchemy.url = postgresql://admin_kiosk3_user:secure_password@localhost:5432/admin_kiosk3|g' alembic.ini
+
+# Modificar env.py para importar nuestros modelos
+echo "
+from models import db
+target_metadata = db.metadata
+" >> migrations/env.py
+
+# Crear la migración inicial
+alembic revision --autogenerate -m "create kiosk tables"
+
+# Aplicar la migración
+alembic upgrade head 
+
+# Verificar que la base de datos existe
+psql -U postgres -l | grep admin_kiosk3
+
+# Conectar y listar las tablas
+psql -U postgres -d admin_kiosk3 -c "\dt"
+
+# Ver la estructura de las tablas si existen
+psql -U postgres -d admin_kiosk3 -c "\d kiosks"
+psql -U postgres -d admin_kiosk3 -c "\d kiosk_events"
+
+# Ver estructura de la tabla kiosks
+psql -U postgres -d admin_kiosk3 -c "\d kiosks"
+
+# Ver estructura de la tabla kiosk_events
+psql -U postgres -d admin_kiosk3 -c "\d kiosk_events"
+
+# Listar tablas
+psql -U postgres -d admin_kiosk3 -c "\dt" 
+
+# Verificar estado de Alembic
+alembic current
+alembic history 
+
+# Verificar la base de datos
+psql -U postgres -l | grep admin_kiosk3
+
+# Verificar las tablas existentes
+psql -U postgres -d admin_kiosk3 -c "\dt"
+
+# Verificar el estado de Alembic
+cd Admin_Kiosk3_Backend/kiosk_service
+alembic current 
+
+cat migrations/env.py 
+
+cat alembic.ini | grep sqlalchemy.url 
+
+psql -h localhost -p 5432 -U admin_kiosk3_user -d admin_kiosk3 

@@ -1,0 +1,18 @@
+---
+description: "Reglas para el desarrollo de middleware: seguridad, autenticación, logging y validación de peticiones de forma global."
+globs: ["**/middleware/**/*.py"]
+---
+## Seguridad y Autenticación
+- Implementar middleware que verifique la autenticación (por ejemplo, validación de JWT) en rutas protegidas.
+- Abortarse la petición con un error (401) si la autenticación falla.
+
+## Logging
+- Incluir un middleware que registre cada solicitud y respuesta, indicando método HTTP, ruta, código de estado y tiempo de procesamiento.
+- Evitar registrar datos sensibles (como contraseñas o tokens).
+
+## Validación
+- Verificar que el Content-Type sea el esperado (por ejemplo, application/json para endpoints JSON).
+- Validar la presencia de datos requeridos antes de procesar la lógica.
+
+## Orden y Consistencia
+- Registrar los middleware de forma centralizada (por ejemplo, en un módulo `middleware/`) y documentar su orden de ejecución.

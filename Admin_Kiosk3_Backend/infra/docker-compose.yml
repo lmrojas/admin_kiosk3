@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: admin_kiosk3
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis para cache y mensajería
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+
+  # API Gateway
+  gateway:
+    build: ./api_gateway
+    ports:
+      - "80:80"
+    depends_on:
+      - auth
+      - kiosk
+      - payment
+      - ai
+      - websocket
+      - notification
+
+  # Servicios
+  auth:
+    build: ./auth_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  kiosk:
+    build: ./kiosk_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  payment:
+    build: ./payment_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  ai:
+    build: ./ai_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  websocket:
+    build: ./websocket_service
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+  notification:
+    build: ./notification_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+volumes:
+  postgres_data: 

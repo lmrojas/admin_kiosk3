@@ -1,0 +1,31 @@
+---
+description: "Reglas para la capa de modelos (ORM con SQLAlchemy y PostgreSQL), asegurando coherencia en nombres, atributos, relaciones y migraciones."
+globs: ["**/models/**/*.py"]
+---
+
+# Your rule content
+
+---
+description: 
+globs: 
+---
+
+## Nombres y Definición
+- Definir modelos como clases en **PascalCase** (por ejemplo, `User`).
+- Utilizar `__tablename__` en formato **snake_case** (por ejemplo, `users`).
+
+## Atributos y Tipos
+- Usar los tipos de SQLAlchemy adecuados (Integer, String, DateTime, etc.).
+- Definir restricciones coherentes (nullable, unique, default).
+- Incluir campos estándares como `id` y `created_at` cuando corresponda.
+
+## Relaciones
+- Establecer relaciones usando `relationship` y `ForeignKey` con nombres consistentes (por ejemplo, `user_id`).
+- Configurar el lazy loading apropiado para cada relación.
+
+## Migraciones
+- Cada cambio en los modelos debe estar acompañado de una migración (usando Alembic o Flask-Migrate).
+- Mantener el control de versiones del esquema de base de datos.
+
+## Lógica de Negocio
+- No incluir lógica de negocio compleja dentro de los modelos; esta debe residir en la capa de servicios.

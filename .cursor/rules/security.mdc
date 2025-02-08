@@ -1,0 +1,20 @@
+---
+description: "Reglas para asegurar la aplicación, incluyendo protección CSRF, XSS, inyección SQL y manejo seguro de JWT y contraseñas."
+globs: ["**/*"]
+---
+## Protección CSRF
+- Habilitar protección CSRF en formularios y peticiones que cambian estado, utilizando Flask-WTF o Flask-SeaSurf.
+
+## Prevención XSS
+- Escapar o sanitizar todo contenido dinámico antes de renderizarlo en vistas (utilizar el autoescape de Jinja2 y librerías como Bleach).
+
+## Prevención de SQL Injection
+- Usar el ORM de SQLAlchemy o consultas parametrizadas en lugar de concatenar entradas de usuario en queries SQL.
+
+## Manejo Seguro de JWT
+- Firmar los tokens JWT con una clave robusta y utilizar algoritmos seguros (HS256 o RS256).
+- Definir tiempos de expiración adecuados y transmitir tokens únicamente sobre HTTPS.
+
+## Almacenamiento de Contraseñas
+- Almacenar contraseñas utilizando algoritmos de hashing seguros (bcrypt o Argon2) con sal aleatoria.
+- Nunca almacenar contraseñas en texto plano.

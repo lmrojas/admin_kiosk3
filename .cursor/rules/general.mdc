@@ -1,0 +1,24 @@
+---
+description: "Reglas generales del proyecto: convenciones de nombres, estructura de directorios, dependencias, modularidad y evitar duplicación de código."
+globs: ["**/*"]
+---
+## Convenciones de Nombres
+- Usar `snake_case` para nombres de archivos y variables.
+- Usar `UpperCamelCase` para nombres de clases.
+- Escribir constantes en MAYÚSCULAS.
+- Seguir las pautas de PEP8.
+
+## Estructura de Directorios
+- Organizar el proyecto siguiendo el patrón MVT: separar carpetas para modelos, vistas (Blueprints), templates y archivos estáticos.
+- Incluir carpetas adicionales para servicios, middleware y configuración.
+
+## Dependencias
+- Definir todas las dependencias en `requirements.txt` con versiones fijas.
+- Utilizar entornos virtuales y mantener actualizados los paquetes.
+
+## Modularidad
+- Dividir la aplicación en módulos desacoplados por funcionalidad.
+- Cada módulo debe incluir su propia lógica (por ejemplo, un Blueprint con sus modelos, servicios y vistas).
+
+## No Duplicar Código
+- Aplicar el principio DRY (Don't Repeat Yourself); centralizar la lógica repetitiva en funciones o servicios reutilizables.

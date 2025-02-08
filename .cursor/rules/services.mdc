@@ -1,0 +1,19 @@
+---
+description: "Reglas para la capa de servicios: la lógica de negocio debe estar desacoplada de los controladores y ser reutilizable."
+globs: ["**/services/**/*.py"]
+---
+## Desacoplamiento
+- La capa de servicios debe ser independiente del contexto de Flask (no depender directamente del objeto request).
+- Los controladores deben invocar servicios pasando solo los datos necesarios.
+
+## Reutilización de Lógica
+- Centralizar funciones comunes en servicios para evitar duplicaciones.
+- Seguir el principio DRY.
+
+## Organización Modular
+- Agrupar funciones y clases por dominio (por ejemplo, auth_service, kiosk_service).
+- Cada servicio debe tener una responsabilidad única y clara.
+
+## Acceso a Modelos y Recursos Externos
+- Los servicios deben orquestar operaciones sobre modelos y llamadas a APIs externas.
+- Facilitar el testing aislado de cada servicio.

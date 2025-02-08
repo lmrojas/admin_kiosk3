@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: monitoring-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: kiosk-alerts
+    rules:
+    - alert: KioskDown
+      expr: up{job="kiosk"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Kiosk is down"
+        description: "Kiosk {{ $labels.instance }} has been down for more than 5 minutes"
+    - alert: HighLatency
+      expr: http_request_duration_seconds{quantile="0.9"} > 2
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High latency detected"
+        description: "90th percentile latency is above 2 seconds for {{ $labels.service }}" 

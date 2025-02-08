@@ -1,0 +1,19 @@
+---
+description: "Reglas para la implementación de WebSockets con Flask-SocketIO y Redis, asegurando escalabilidad, autenticación y no bloqueo en el manejo de eventos."
+globs: ["**/sockets.py", "**/websockets/**/*.py"]
+---
+## Integración con Redis
+- Configurar SocketIO para usar Redis como message_queue.
+- Asegurarse de que la URL de Redis esté definida en la configuración (por ejemplo, REDIS_URL).
+
+## Autenticación en WebSockets
+- Requerir autenticación (por ejemplo, validación de token JWT) durante el handshake de la conexión.
+- Desconectar clientes que no presenten credenciales válidas.
+
+## Nombres de Eventos y Salas
+- Definir nombres de eventos en snake_case que sean descriptivos (ej., `nuevo_mensaje`, `kiosk_status_update`).
+- Utilizar salas (rooms) para segmentar la emisión de eventos, asignando nombres únicos basados en identificadores (por ejemplo, el ID de un kiosko).
+
+## Rendimiento
+- Mantener los manejadores de eventos breves y no bloqueantes.
+- Delegar tareas pesadas a procesos en segundo plano o tareas asíncronas.

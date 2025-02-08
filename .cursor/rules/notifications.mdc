@@ -1,0 +1,24 @@
+---
+description: "Reglas para la implementación del sistema de notificaciones vía WhatsApp y Telegram, asegurando el desacoplamiento de la lógica y el envío asíncrono."
+globs: ["**/notifications/**/*.py"]
+---
+## Uso de APIs Oficiales
+- Utilizar Twilio (o la API oficial de WhatsApp Business) para notificaciones de WhatsApp.
+- Utilizar la API de Telegram Bot para enviar mensajes a través de Telegram.
+
+## Desacoplamiento
+- Mantener la lógica de notificaciones separada de los controladores. Los servicios de notificaciones deben ser invocados desde cualquier módulo que requiera enviar alertas.
+
+## Formato y Contenido de los Mensajes
+- Los mensajes deben ser claros y concisos, sin incluir información sensible.
+- Seguir el formato soportado por cada canal (texto plano, TwiML para Twilio, etc.).
+
+## Manejo de Errores y Reintentos
+- Implementar manejo de excepciones y reintentos con una estrategia exponencial para los envíos fallidos.
+- Evitar la duplicación de mensajes en caso de reintentos.
+
+## Almacenamiento de Credenciales
+- Cargar credenciales (tokens, claves API) desde la configuración o variables de entorno; no incluirlas en el código fuente.
+
+## Envío Asíncrono
+- Realizar el envío de mensajes de forma asíncrona (por ejemplo, mediante Celery) para no bloquear la respuesta HTTP.

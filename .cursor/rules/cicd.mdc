@@ -1,0 +1,26 @@
+---
+description: "Reglas para la integración y despliegue continuo (CI/CD) utilizando Docker, pipelines automatizados y versionado semántico."
+globs: ["**/Dockerfile", "**/docker-compose.yml", "**/ci/*.yml"]
+---
+## Dockerfile y Contenedorización
+- Usar una imagen base ligera (por ejemplo, python:3.11-slim).
+- Emplear multi-stage builds para optimizar el tamaño final de la imagen.
+- Configurar WORKDIR, copiar únicamente los archivos necesarios e instalar dependencias con versiones fijas.
+- Ejecutar la aplicación con un servidor de producción (por ejemplo, Gunicorn con workers eventlet/gevent).
+
+## Pruebas Automatizadas
+- Integrar una suite de pruebas (unitarias e integración) en el pipeline CI.
+- No avanzar en el despliegue si alguna prueba falla.
+
+## Pipeline de CI (por ejemplo, GitHub Actions)
+- Configurar jobs que instalen dependencias, ejecuten linters (flake8, black) y corran los tests.
+- Utilizar caché de dependencias para optimizar tiempos.
+
+## Despliegue Automatizado
+- Construir y etiquetar la imagen Docker tras pasar las pruebas.
+- Desplegar utilizando estrategias de blue-green o canary para minimizar downtime.
+- Integrar el proceso de despliegue en un pipeline de CD, asegurando la coherencia entre entornos.
+
+## Versionado y Auditoría
+- Adoptar un flujo basado en Pull Requests y versionado semántico.
+- Etiquetar versiones en Git y documentar cambios relevantes en cada release.

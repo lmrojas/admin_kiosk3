@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kiosk-deployment
+  labels:
+    app: kiosk
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kiosk
+  template:
+    metadata:
+      labels:
+        app: kiosk
+    spec:
+      containers:
+      - name: kiosk
+        image: admin-kiosk3/kiosk:latest
+        ports:
+        - containerPort: 5002
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 

@@ -1,0 +1,23 @@
+---
+description: "Reglas para implementar un sistema de logging estructurado, seguro y accesible mediante una interfaz HTML en el sistema."
+globs: ["**/middleware/logging*.py", "**/logging/**/*.py"]
+---
+## Objetivo del Logging
+- Asegurar que todos los eventos críticos se registren para facilitar la trazabilidad y el diagnóstico.
+
+## Formato y Estructura
+- Los logs deben guardarse en formato estructurado (preferiblemente JSON).
+- Cada registro debe incluir: timestamp (ISO 8601 en UTC), nivel (DEBUG, INFO, WARNING, ERROR, CRITICAL), mensaje descriptivo, y campos relevantes (user_id, request_id, componente, etc.).
+
+## Accesibilidad a través de una Interfaz Web
+- Implementar una vista HTML segura para que administradores puedan consultar los logs.
+- La interfaz debe permitir filtrar por fecha, nivel y componente, y contar con paginación.
+- Proteger esta interfaz mediante autenticación (acceso solo a usuarios con rol “admin” o similar) y servirla únicamente vía HTTPS.
+
+## Seguridad y Privacidad
+- No registrar datos sensibles (contraseñas, tokens, información PII).
+- Escapar adecuadamente los datos al mostrarlos para prevenir XSS.
+- Sincronizar los relojes de los servidores para tener timestamps coherentes.
+
+## Normas Internacionales y Trazabilidad
+- Alinear el sistema de logging con normas como ISO 9001 e ISO/IEC 27001 para asegurar la trazabilidad y la integridad de los registros.

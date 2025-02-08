@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: admin_kiosk3
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis para cache y mensajería
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+
+  # Servicio de autenticación
+  auth:
+    build: ./auth_service
+    ports:
+      - "5001:5001"
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  # Servicio de kioskos
+  kiosk:
+    build: ./kiosk_service
+    ports:
+      - "5002:5002"
+    depends_on:
+      - db
+      - redis
+      - auth
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  # Servicio de pagos
+  payment:
+    build: ./payment_service
+    ports:
+      - "5003:5003"
+    depends_on:
+      - db
+      - redis
+      - auth
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  # Servicio de IA
+  ai:
+    build: ./ai_service
+    ports:
+      - "5004:5004"
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  # Servicio de WebSocket
+  websocket:
+    build: ./websocket_service
+    ports:
+      - "5005:5005"
+    depends_on:
+      - redis
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+  # Servicio de notificaciones
+  notification:
+    build: ./notification_service
+    ports:
+      - "5006:5006"
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+volumes:
+  postgres_data: 

@@ -1,0 +1,22 @@
+---
+description: "Reglas para las vistas y controladores (Blueprints) que conforman la capa de presentación en el patrón MVT."
+globs: ["**/blueprints/**/*.py", "**/views/**/*.py"]
+---
+## Organización en Blueprints
+- Dividir las rutas en Blueprints separados por funcionalidad (ej., auth, kiosk, dashboard, api).
+- Registrar cada Blueprint en la aplicación principal con un prefijo adecuado.
+
+## Responsabilidad de las Vistas
+- Las vistas deben limitarse a gestionar la entrada y salida HTTP.
+- Delegar la lógica de negocio a la capa de servicios.
+
+## Uso de Templates
+- Para respuestas HTML, utilizar plantillas Jinja2 ubicadas en la carpeta `templates/`.
+- No incluir lógica de negocio en las plantillas; mantener solo la presentación.
+
+## Rutas y Métodos
+- Definir rutas RESTful claras, especificando los métodos HTTP permitidos.
+- Utilizar códigos de estado HTTP apropiados en las respuestas.
+
+## Manejo de Errores
+- Implementar manejadores de errores globales o por Blueprint para capturar excepciones y retornar mensajes de error sin exponer información sensible.

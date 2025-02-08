@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  # Base de datos
+  DATABASE_URL: "postgresql://user:password@postgres:5432/admin_kiosk3"
+  
+  # Redis
+  REDIS_URL: "redis://redis:6379/0"
+  
+  # JWT
+  JWT_SECRET_KEY: "super-secret-key"
+  
+  # Entorno
+  FLASK_ENV: "production"
+  FLASK_DEBUG: "0"
+  
+  # Puertos de servicios
+  AUTH_SERVICE_PORT: "5001"
+  KIOSK_SERVICE_PORT: "5002"
+  PAYMENT_SERVICE_PORT: "5003"
+  AI_SERVICE_PORT: "5004"
+  WEBSOCKET_SERVICE_PORT: "5005"
+  NOTIFICATION_SERVICE_PORT: "5006" 

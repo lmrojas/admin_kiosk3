@@ -1,0 +1,18 @@
+---
+description: "Reglas para la gestión de la configuración por entornos, utilizando archivos o clases de configuración y variables de entorno para mantener los secretos fuera del código."
+globs: ["**/config/**/*.py"]
+---
+## Gestión por Entornos
+- Separar la configuración para desarrollo, testing y producción mediante clases o archivos distintos (por ejemplo, DevelopmentConfig, ProductionConfig, TestingConfig).
+
+## Variables de Entorno
+- Cargar todas las credenciales y configuraciones sensibles mediante variables de entorno (por ejemplo, SECRET_KEY, DATABASE_URL, REDIS_URL).
+- No codificar directamente valores sensibles en el código.
+
+## Estructura de Configuración
+- Definir una clase base con valores comunes y clases derivadas que sobreescriban parámetros específicos según el entorno.
+- Alternativamente, usar archivos de configuración (JSON, YAML o .env) y cargarlos dinámicamente.
+
+## No Exponer Secretos
+- Incluir en .gitignore archivos que contengan datos sensibles (por ejemplo, .env).
+- Proveer archivos de ejemplo (por ejemplo, .env.example) sin datos sensibles.

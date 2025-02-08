@@ -1,0 +1,22 @@
+---
+description: "Reglas para el módulo de Inteligencia Artificial: autoentrenamiento continuo, monitoreo a través de una interfaz HTML, opción de entrenamiento manual y trazabilidad completa."
+globs: ["**/services/ai_service.py", "**/ai/**/*.py"]
+---
+## Autoentrenamiento Continuo
+- **Habilitado:** El autoentrenamiento debe ejecutarse periódicamente (por ejemplo, cada 24 horas o tras acumular suficientes nuevos datos).
+- **Registro:** Registrar cada ciclo de autoentrenamiento en logs y en una base de datos interna, incluyendo métricas como precisión, tasa de error, duración y volumen de datos utilizados.
+- **Notificaciones:** Enviar alertas automáticas si el desempeño del modelo cae por debajo de un umbral definido o se detectan anomalías.
+
+## Entrenamiento Manual
+- **Opción Manual:** Debe existir una interfaz HTML segura que permita a un administrador iniciar un ciclo de entrenamiento manual.
+- **Acciones Disponibles:** La interfaz debe permitir iniciar, detener y revisar el estado del entrenamiento manual, así como comparar resultados con ciclos automáticos.
+- **Restricción de Acceso:** Solo usuarios autorizados (por ejemplo, administradores o data scientists) deben tener acceso a esta interfaz.
+
+## Monitoreo y Trazabilidad
+- **Dashboard AI:** Incluir gráficos y tablas en la interfaz HTML que muestren la evolución de las métricas del modelo (precisión, F1 score, tasa de error) a lo largo del tiempo.
+- **Registro Detallado:** Cada acción de entrenamiento (automático o manual) debe incluir un identificador único, timestamp, parámetros usados y resultados obtenidos.
+- **Integración CI/CD:** El proceso de entrenamiento debe integrarse en el pipeline de CI/CD para validar la calidad del modelo antes de desplegar nuevas versiones.
+
+## Normas y Buenas Prácticas
+- **Alineación con Normas Internacionales:** El proceso debe cumplir con estándares de calidad y seguridad (ISO 9001, ISO/IEC 27001, ISO/IEC 12207) para garantizar trazabilidad y mejora continua.
+- **Documentación:** Documentar cada ciclo de entrenamiento y cambios en el modelo para auditorías y seguimiento de mejoras.

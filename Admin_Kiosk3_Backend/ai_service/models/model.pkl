@@ -1,0 +1,2 @@
+# Archivo binario generado por joblib.dump()
+# Contiene el modelo RandomForestClassifier entrenado 

@@ -1,0 +1,2940 @@
+
+================================================================================
+File: Admin_Kiosk3_Backend\README.md
+================================================================================
+# Admin Kiosk 3 - Sistema de Gestión de Kioskos
+
+## Descripción
+Sistema de gestión de kioskos basado en microservicios para administrar ventas, pagos, inventario y análisis de datos.
+
+## Servicios
+- Auth Service (Puerto 5001): Autenticación y autorización
+- Kiosk Service (Puerto 5002): Gestión de kioskos y ventas
+- Payment Service (Puerto 5003): Procesamiento de pagos
+- AI Service (Puerto 5004): Análisis predictivo y recomendaciones
+- WebSocket Service (Puerto 5005): Comunicación en tiempo real
+- Notification Service (Puerto 5006): Sistema de notificaciones
+
+## Requisitos
+- Python 3.9+
+- PostgreSQL 13+
+- Redis 6+
+- Docker y Docker Compose
+
+## Instalación
+1. Clonar repositorio
+2. Copiar .env.example a .env y configurar variables
+3. Ejecutar `docker-compose up --build`
+
+## Desarrollo
+- Instalar dependencias: `pip install -r requirements.txt`
+- Ejecutar tests: `pytest`
+- Formatear código: `black .`
+
+## Documentación
+Ver documentación detallada en /docs 
+
+================================================================================
+File: Admin_Kiosk3_Backend\requirements.txt
+================================================================================
+# Dependencias comunes para todos los servicios
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+psycopg2-binary==2.9.1
+redis==3.5.3
+pytest==6.2.5
+black==21.6b0
+flake8==3.9.2
+
+# Framework y extensiones básicas
+Flask-Migrate==4.0.5
+Flask-SocketIO==5.3.6
+Flask-WTF==1.2.1
+Flask-Cors==4.0.0
+
+# Base de datos y ORM
+SQLAlchemy==2.0.23
+alembic==1.13.0
+
+# Seguridad
+bcrypt==4.1.1
+PyJWT==2.8.0
+python-dotenv==1.0.0
+cryptography==41.0.7
+
+# WebSockets y async
+eventlet==0.33.3
+celery==5.3.6
+
+# IA y ML
+scikit-learn==1.3.2
+pandas==2.1.3
+numpy==1.26.2
+
+# Notificaciones
+twilio==8.10.0
+python-telegram-bot==20.7
+
+# Utilidades
+requests==2.31.0
+python-dateutil==2.8.2
+Pillow==10.1.0
+bleach==6.1.0
+
+# Testing
+pytest-cov==4.1.0
+pytest-flask==1.3.0
+
+# Servidor de producción
+gunicorn==21.2.0
+
+# Linting y formateo
+isort==5.12.0 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\app.py
+================================================================================
+from flask import Flask
+from flask_socketio import SocketIO, emit
+from flask_jwt_extended import JWTManager
+from Admin_Kiosk3_Backend.common.config import Config
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+
+app = Flask(__name__)
+Config.init_app(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+jwt = JWTManager(app)
+log = get_logger('websocket_service')
+
+@socketio.on('connect')
+def handle_connect():
+    """Manejar nueva conexión WebSocket"""
+    emit('connection_response', {'data': 'Conectado al servidor WebSocket'})
+
+@socketio.on('kiosk_update')
+def handle_kiosk_update(data):
+    """Manejar actualización de estado de kiosko"""
+    # Broadcast a todos los clientes conectados
+    emit('kiosk_status', data, broadcast=True)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Manejar desconexión de cliente"""
+    print('Cliente desconectado')
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5005) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\routes.py
+================================================================================
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_socketio import emit
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.websocket_service.services import broadcast_message
+from Admin_Kiosk3_Backend.websocket_service.models import WebSocketConnection, db
+
+ws_bp = Blueprint('websocket', __name__)
+log = get_logger('websocket_routes')
+
+@ws_bp.route('/broadcast', methods=['POST'])
+@jwt_required()
+def broadcast():
+    """Endpoint REST para enviar mensaje broadcast a todos los clientes"""
+    data = request.get_json()
+    if not data or 'message' not in data:
+        return jsonify({'message': 'Datos de mensaje no proporcionados'}), 400
+    
+    if broadcast_message(data['message']):
+        return jsonify({'message': 'Mensaje enviado'}), 200
+    return jsonify({'message': 'Error enviando mensaje'}), 500
+
+@ws_bp.route('/connections', methods=['GET'])
+@jwt_required()
+def get_connections():
+    """Obtener estado de las conexiones WebSocket"""
+    active_connections = WebSocketConnection.query.filter_by(status='active').all()
+    return jsonify({
+        'status': 'running',
+        'active_connections': len(active_connections),
+        'connections': [conn.to_dict() for conn in active_connections]
+    }), 200 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\services.py
+================================================================================
+from flask_socketio import emit
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.websocket_service.models import WebSocketConnection, db
+import datetime
+
+log = get_logger('websocket_service')
+
+def broadcast_message(message, event_type='broadcast_message'):
+    """Enviar mensaje a todos los clientes conectados"""
+    try:
+        emit(event_type, {'message': message}, broadcast=True, namespace='/')
+        log.info(f"Mensaje broadcast enviado: {message}")
+        return True
+    except Exception as e:
+        log.error(f"Error enviando broadcast: {str(e)}")
+        return False
+
+def register_connection(session_id, user_id=None):
+    """Registrar nueva conexión WebSocket"""
+    try:
+        connection = WebSocketConnection(
+            session_id=session_id,
+            user_id=user_id
+        )
+        db.session.add(connection)
+        db.session.commit()
+        log.info(f"Nueva conexión registrada: {session_id}")
+        return connection
+    except Exception as e:
+        log.error(f"Error registrando conexión: {str(e)}")
+        return None
+
+def close_connection(session_id):
+    """Marcar conexión como cerrada"""
+    connection = WebSocketConnection.query.filter_by(session_id=session_id).first()
+    if connection:
+        connection.status = 'disconnected'
+        connection.disconnected_at = datetime.datetime.utcnow()
+        db.session.commit()
+        log.info(f"Conexión cerrada: {session_id}")
+        return True
+    return False
+
+def get_connected_clients():
+    """Obtener número de clientes conectados"""
+    # En un caso real, esto podría consultar Redis para conexiones distribuidas
+    return 'N/A' 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\middleware.py
+================================================================================
+from functools import wraps
+from flask import request, jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
+
+def socket_auth_required():
+    """Decorador para autenticar conexiones WebSocket"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") not in ["admin", "socket_manager"]:
+                return jsonify({"msg": "Acceso denegado"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\config.py
+================================================================================
+import os
+from Admin_Kiosk3_Backend.common.config import Config as BaseConfig
+
+class Config(BaseConfig):
+    """Configuración específica del servicio de WebSocket"""
+    SERVICE_NAME = 'websocket_service'
+    SERVICE_PORT = 5005
+    
+    # Configuraciones específicas de WebSocket
+    SOCKET_PING_TIMEOUT = int(os.environ.get('SOCKET_PING_TIMEOUT', 60))  # 1 minuto
+    SOCKET_PING_INTERVAL = int(os.environ.get('SOCKET_PING_INTERVAL', 25))  # 25 segundos
+
+class DevelopmentConfig(Config):
+    """Configuración de desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración de producción"""
+    DEBUG = False
+
+# Configuración por defecto
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'default': DevelopmentConfig
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\requirements.txt
+================================================================================
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+Flask-SocketIO==5.1.1
+python-socketio==5.4.0
+eventlet==0.31.0
+redis==3.5.3 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\models.py
+================================================================================
+from flask_sqlalchemy import SQLAlchemy
+from Admin_Kiosk3_Backend.common.utils import format_timestamp
+import datetime
+
+db = SQLAlchemy()
+
+class WebSocketConnection(db.Model):
+    __tablename__ = 'websocket_connections'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=True)
+    session_id = db.Column(db.String(100), unique=True, nullable=False)
+    connected_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    disconnected_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='active')  # active, disconnected
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'session_id': self.session_id,
+            'connected_at': format_timestamp(self.connected_at),
+            'disconnected_at': format_timestamp(self.disconnected_at),
+            'status': self.status
+        } 
+
+================================================================================
+File: Admin_Kiosk3_Backend\websocket_service\tests\test_websocket.py
+================================================================================
+import unittest
+from flask import json
+from Admin_Kiosk3_Backend.websocket_service.app import app, socketio
+from flask_socketio import SocketIOTestClient
+
+class WebSocketTestCase(unittest.TestCase):
+    def setUp(self):
+        self.app = app.test_client()
+        self.socket_client = SocketIOTestClient(app, socketio)
+    
+    def tearDown(self):
+        self.socket_client.disconnect()
+    
+    def test_connect(self):
+        """Test de conexión WebSocket"""
+        self.socket_client.connect()
+        received = self.socket_client.get_received()
+        self.assertTrue(len(received) > 0)
+        self.assertEqual(received[0]['name'], 'connection_response')
+    
+    def test_broadcast(self):
+        """Test de broadcast de mensaje"""
+        self.socket_client.connect()
+        response = self.app.post('/broadcast',
+            json={'message': 'test message'})
+        self.assertEqual(response.status_code, 200)
+        received = self.socket_client.get_received()
+        self.assertTrue(any(msg['name'] == 'broadcast_message' for msg in received))
+
+if __name__ == '__main__':
+    unittest.main() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\app.py
+================================================================================
+import os
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, jwt_required
+import joblib
+import numpy as np
+from Admin_Kiosk3_Backend.common.config import Config
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.ai_service.models import AIModel, db
+
+app = Flask(__name__)
+Config.init_app(app)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://user:password@db:5432/admin_kiosk3')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-key')
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+log = get_logger('ai_service')
+
+# Cargar modelo entrenado
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'model.pkl')
+model = None
+if os.path.exists(MODEL_PATH):
+    model = joblib.load(MODEL_PATH)
+
+@app.route('/ai/predict', methods=['POST'])
+@jwt_required()
+def predict():
+    """Endpoint para obtener predicciones del modelo"""
+    if not model:
+        return jsonify({'message': 'Modelo no disponible'}), 503
+    
+    data = request.get_json()
+    if not data or 'features' not in data:
+        return jsonify({'message': 'Datos de entrada no proporcionados'}), 400
+    
+    try:
+        features = np.array(data['features']).reshape(1, -1)
+        prediction = model.predict(features)[0]
+        return jsonify({'prediction': prediction.tolist()}), 200
+    except Exception as e:
+        return jsonify({'message': f'Error al procesar predicción: {str(e)}'}), 500
+
+@app.route('/ai/metrics', methods=['GET'])
+@jwt_required()
+def get_metrics():
+    """Obtener métricas del modelo (ejemplo: accuracy, etc.)"""
+    if not model:
+        return jsonify({'message': 'Modelo no disponible'}), 503
+    
+    metrics = {
+        'model_type': type(model).__name__,
+        'features_count': model.n_features_in_ if hasattr(model, 'n_features_in_') else None,
+        'last_training': 'Not available'
+    }
+    return jsonify(metrics), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5004) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\models.py
+================================================================================
+from flask_sqlalchemy import SQLAlchemy
+from Admin_Kiosk3_Backend.common.utils import format_timestamp
+import datetime
+import json
+
+db = SQLAlchemy()
+
+class AIModel(db.Model):
+    __tablename__ = 'ai_models'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    version = db.Column(db.String(20), nullable=False)
+    status = db.Column(db.String(20), default='active')  # active, training, failed
+    metrics = db.Column(db.JSON)  # métricas del modelo (accuracy, precision, etc.)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    updated_at = db.Column(db.DateTime, onupdate=datetime.datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'version': self.version,
+            'status': self.status,
+            'metrics': json.loads(self.metrics) if isinstance(self.metrics, str) else self.metrics,
+            'created_at': format_timestamp(self.created_at),
+            'updated_at': format_timestamp(self.updated_at)
+        } 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\routes.py
+================================================================================
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required
+from .models import AIModel, db
+from .services import load_model, make_prediction
+
+ai_bp = Blueprint('ai', __name__)
+
+@ai_bp.route('/predict', methods=['POST'])
+@jwt_required()
+def predict():
+    """Endpoint para obtener predicciones del modelo"""
+    model = load_model()
+    if not model:
+        return jsonify({'message': 'Modelo no disponible'}), 503
+    
+    data = request.get_json()
+    if not data or 'features' not in data:
+        return jsonify({'message': 'Datos de entrada no proporcionados'}), 400
+    
+    try:
+        prediction = make_prediction(data['features'], model)
+        return jsonify({'prediction': prediction.tolist()}), 200
+    except Exception as e:
+        return jsonify({'message': f'Error al procesar predicción: {str(e)}'}), 500
+
+@ai_bp.route('/metrics', methods=['GET'])
+@jwt_required()
+def get_metrics():
+    """Obtener métricas del modelo activo"""
+    active_model = AIModel.query.filter_by(status='active').first()
+    if not active_model:
+        return jsonify({'message': 'No hay modelo activo'}), 404
+    return jsonify(active_model.metrics), 200 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\services.py
+================================================================================
+from Admin_Kiosk3_Backend.ai_service.models import AIModel, db
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+import joblib
+import os
+import numpy as np
+from datetime import datetime
+
+log = get_logger('ai_service')
+
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'model.pkl')
+
+def load_model():
+    """Cargar modelo entrenado desde archivo"""
+    try:
+        from Admin_Kiosk3_Backend.ai_service.config import Config
+        model = joblib.load(Config.MODEL_PATH)
+        log.info("Modelo cargado exitosamente")
+        return model
+    except Exception as e:
+        log.error(f"Error cargando modelo: {str(e)}")
+        return None
+
+def make_prediction(features, model):
+    """Realizar predicción usando el modelo"""
+    try:
+        features_array = np.array(features).reshape(1, -1)
+        prediction = model.predict(features_array)[0]
+        log.info(f"Predicción realizada: {prediction}")
+        return prediction
+    except Exception as e:
+        log.error(f"Error en predicción: {str(e)}")
+        raise Exception(f"Error en predicción: {str(e)}")
+
+def update_model_metrics(model_id: int, metrics: dict):
+    """Actualizar métricas del modelo"""
+    model = AIModel.query.get(model_id)
+    if model:
+        model.metrics = metrics
+        model.updated_at = datetime.utcnow()
+        db.session.commit()
+        log.info(f"Métricas actualizadas para modelo {model_id}")
+        return True
+    return False
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\middleware.py
+================================================================================
+from functools import wraps
+from flask import request, jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
+
+def ai_access_required():
+    """Decorador para rutas que requieren acceso a funciones de IA"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") not in ["admin", "ai_manager"]:
+                return jsonify({"msg": "Acceso denegado"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\config.py
+================================================================================
+import os
+from Admin_Kiosk3_Backend.common.config import Config as BaseConfig
+
+class Config(BaseConfig):
+    """Configuración específica del servicio de IA"""
+    SERVICE_NAME = 'ai_service'
+    SERVICE_PORT = 5004
+    
+    # Configuraciones específicas de IA
+    MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'model.pkl')
+    MODEL_UPDATE_INTERVAL = int(os.environ.get('MODEL_UPDATE_INTERVAL', 86400))  # 24 horas
+    PREDICTION_TIMEOUT = int(os.environ.get('PREDICTION_TIMEOUT', 30))  # 30 segundos
+
+class DevelopmentConfig(Config):
+    """Configuración de desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración de producción"""
+    DEBUG = False
+
+# Configuración por defecto
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'default': DevelopmentConfig
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\requirements.txt
+================================================================================
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+psycopg2-binary==2.9.1
+scikit-learn==0.24.2
+numpy==1.21.0
+pandas==1.3.0
+joblib==1.0.1 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\models\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\training\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\training\train_model.py
+================================================================================
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+import os
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.ai_service.config import Config
+
+log = get_logger('ai_training')
+
+def train_model():
+    """Script de entrenamiento del modelo"""
+    # En un caso real, cargaríamos datos de una fuente real
+    # Por ejemplo, datos históricos de ventas de kioskos
+    
+    # Simulación de datos de ejemplo
+    data = pd.DataFrame({
+        'feature1': np.random.rand(1000),
+        'feature2': np.random.rand(1000),
+        'target': np.random.randint(0, 2, 1000)
+    })
+    
+    X = data[['feature1', 'feature2']]
+    y = data['target']
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+    
+    model = RandomForestClassifier()
+    model.fit(X_train, y_train)
+    
+    # Guardar el modelo entrenado
+    joblib.dump(model, Config.MODEL_PATH)
+    
+    accuracy = model.score(X_test, y_test)
+    log.info(f'Modelo entrenado con accuracy: {accuracy}')
+    return accuracy
+
+if __name__ == '__main__':
+    accuracy = train_model()
+    print(f'Modelo entrenado con accuracy: {accuracy}') 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\tests\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\ai_service\tests\test_ai.py
+================================================================================
+import unittest
+from flask import json
+from Admin_Kiosk3_Backend.ai_service.app import app
+from Admin_Kiosk3_Backend.ai_service.models import db, AIModel
+import numpy as np
+
+class AITestCase(unittest.TestCase):
+    def setUp(self):
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        self.db = db
+        
+        # Crear tablas y modelo de prueba
+        with app.app_context():
+            db.create_all()
+            test_model = AIModel(
+                name='test_model',
+                version='1.0',
+                status='active',
+                metrics={'accuracy': 0.95}
+            )
+            db.session.add(test_model)
+            db.session.commit()
+    
+    def tearDown(self):
+        with app.app_context():
+            db.session.remove()
+            db.drop_all()
+    
+    def test_predict(self):
+        """Test de predicción del modelo"""
+        test_features = np.random.rand(5).tolist()  # 5 features aleatorias
+        response = self.app.post('/ai/predict',
+            json={'features': test_features})
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertIn('prediction', data)
+
+if __name__ == '__main__':
+    unittest.main() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\api_gateway\gateway.conf
+================================================================================
+# Configuración de API Gateway (Nginx)
+
+# Upstream servers
+upstream auth_service {
+    server auth:5001;
+}
+
+upstream kiosk_service {
+    server kiosk:5002;
+}
+
+upstream payment_service {
+    server payment:5003;
+}
+
+upstream ai_service {
+    server ai:5004;
+}
+
+upstream websocket_service {
+    server websocket:5005;
+}
+
+upstream notification_service {
+    server notification:5006;
+}
+
+# Server configuration
+server {
+    listen 80;
+    server_name api.admin-kiosk3.com;
+
+    # Auth Service
+    location /auth/ {
+        proxy_pass http://auth_service/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Kiosk Service
+    location /kiosk/ {
+        proxy_pass http://kiosk_service/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Payment Service
+    location /payment/ {
+        proxy_pass http://payment_service/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # AI Service
+    location /ai/ {
+        proxy_pass http://ai_service/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # WebSocket Service
+    location /ws/ {
+        proxy_pass http://websocket_service/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # Notification Service
+    location /notify/ {
+        proxy_pass http://notification_service/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\models.py
+================================================================================
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from Admin_Kiosk3_Backend.common.utils import format_timestamp
+
+db = SQLAlchemy()
+
+class User(db.Model):
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128))
+    role = db.Column(db.String(20), nullable=False, default='operator')
+    is_active = db.Column(db.Boolean, default=True)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+        
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'role': self.role
+        }
+
+class Role(db.Model):
+    __tablename__ = 'roles'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(20), unique=True, nullable=False)
+    permissions = db.Column(db.JSON) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\routes.py
+================================================================================
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from .models import db, User
+from .services import AuthService
+
+auth_bp = Blueprint('auth', __name__)
+
+@auth_bp.route('/register', methods=['POST'])
+def register():
+    """Registro de un nuevo usuario"""
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({'message': 'Datos incompletos'}), 400
+    # Verificar si el usuario ya existe
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({'message': 'Usuario ya existe'}), 409
+    # Crear nuevo usuario
+    user = User(username=data['username'], role=data.get('role', 'user'))
+    user.set_password(data['password'])
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({'message': f'Usuario {user.username} creado exitosamente'}), 201
+
+@auth_bp.route('/login', methods=['POST'])
+def login():
+    """Autenticación de usuario y generación de JWT"""
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({'message': 'Credenciales no proporcionadas'}), 400
+    user = User.query.filter_by(username=data['username']).first()
+    if not user or not user.check_password(data['password']):
+        return jsonify({'message': 'Credenciales incorrectas'}), 401
+    # Generar token de acceso JWT
+    additional_claims = {"role": user.role}
+    access_token = create_access_token(identity=user.id, additional_claims=additional_claims)
+    return jsonify({
+        'message': 'Inicio de sesión exitoso',
+        'token': access_token,
+        'user': {'id': user.id, 'username': user.username, 'role': user.role}
+    }), 200
+
+@auth_bp.route('/users', methods=['GET'])
+@jwt_required()
+def list_users():
+    """Ejemplo de ruta protegida que lista usuarios (requiere rol admin)"""
+    current_user_id = get_jwt_identity()
+    claims = request.jwt_validation_claims if hasattr(request, 'jwt_validation_claims') else None
+    users = User.query.all()
+    result = [{'id': u.id, 'username': u.username, 'role': u.role} for u in users]
+    return jsonify(result), 200
+
+@auth_bp.route('/profile', methods=['GET'])
+@jwt_required()
+def profile():
+    """Obtener perfil del usuario actual"""
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    return jsonify(user.to_dict()) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\services.py
+================================================================================
+from Admin_Kiosk3_Backend.common.security.jwt_auth import generate_token
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from .models import User, db
+
+log = get_logger('auth_service')
+
+class AuthService:
+    @staticmethod
+    def create_user(username, password, role='user'):
+        """Crear un nuevo usuario"""
+        user = User(username=username, role=role)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        log.info(f"Usuario creado: {username}")
+        return user
+
+    @staticmethod
+    def authenticate_user(username, password):
+        """Autenticar usuario y generar token JWT"""
+        user = User.query.filter_by(username=username).first()
+        if not user or not user.check_password(password):
+            log.warning(f"Intento de login fallido para usuario: {username}")
+            return None
+        
+        additional_claims = {"role": user.role}
+        access_token = generate_token(user.id, additional_claims)
+        log.info(f"Login exitoso: {username}")
+        return access_token, user
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\middleware.py
+================================================================================
+from functools import wraps
+from flask import request, jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
+
+def admin_required():
+    """Decorador para rutas que requieren rol de administrador"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") != "admin":
+                return jsonify({"msg": "Acceso denegado"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+from flask import Flask
+from Admin_Kiosk3_Backend.common.config import Config
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+
+log = get_logger('auth_service')
+
+def create_app():
+    app = Flask(__name__)
+    Config.init_app(app)
+    
+    from .models import db
+    db.init_app(app)
+    
+    from .routes import auth_bp
+    app.register_blueprint(auth_bp, url_prefix='/auth')
+    
+    return app 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\app.py
+================================================================================
+import os
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
+from Admin_Kiosk3_Backend.common.config import Config
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.auth_service.models import User, db
+
+app = Flask(__name__)
+Config.init_app(app)
+# Configuración de la app Flask
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://user:password@db:5432/admin_kiosk3')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-key')  # Clave JWT segura en entorno
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+log = get_logger('auth_service')
+
+# Modelo de Usuario con roles
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password_hash = db.Column(db.String(128), nullable=False)
+    role = db.Column(db.String(20), default='user')  # rol del usuario (e.g., admin, user)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+# Crear tablas (solo en entorno de desarrollo, en producción usar migraciones)
+with app.app_context():
+    db.create_all()
+
+@app.route('/auth/register', methods=['POST'])
+def register():
+    """Registro de un nuevo usuario"""
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({'message': 'Datos incompletos'}), 400
+    # Verificar si el usuario ya existe
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({'message': 'Usuario ya existe'}), 409
+    # Crear nuevo usuario
+    user = User(username=data['username'], role=data.get('role', 'user'))
+    user.set_password(data['password'])
+    db.session.add(user)
+    db.session.commit()
+    return jsonify({'message': f'Usuario {user.username} creado exitosamente'}), 201
+
+@app.route('/auth/login', methods=['POST'])
+def login():
+    """Autenticación de usuario y generación de JWT"""
+    data = request.get_json()
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({'message': 'Credenciales no proporcionadas'}), 400
+    user = User.query.filter_by(username=data['username']).first()
+    if not user or not user.check_password(data['password']):
+        return jsonify({'message': 'Credenciales incorrectas'}), 401
+    # Generar token de acceso JWT
+    additional_claims = {"role": user.role}
+    access_token = create_access_token(identity=user.id, additional_claims=additional_claims)
+    return jsonify({
+        'message': 'Inicio de sesión exitoso',
+        'token': access_token,
+        'user': {'id': user.id, 'username': user.username, 'role': user.role}
+    }), 200
+
+@app.route('/auth/users', methods=['GET'])
+@jwt_required()  # Solo usuarios autenticados (ej. admin) pueden listar usuarios
+def list_users():
+    """Ejemplo de ruta protegida que lista usuarios (requiere rol admin)"""
+    current_user_id = get_jwt_identity()
+    # Opcional: verificar rol del usuario actual
+    claims = request.jwt_validation_claims if hasattr(request, 'jwt_validation_claims') else None
+    # Si quisiéramos forzar que solo admin pueda acceder:
+    # if claims is None or claims.get('role') != 'admin':
+    #     return jsonify({'message': 'Acceso no autorizado'}), 403
+    users = User.query.all()
+    result = [{'id': u.id, 'username': u.username, 'role': u.role} for u in users]
+    return jsonify(result), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\config.py
+================================================================================
+import os
+from Admin_Kiosk3_Backend.common.config import Config as BaseConfig
+
+class Config(BaseConfig):
+    """Configuración específica del servicio de autenticación"""
+    SERVICE_NAME = 'auth_service'
+    SERVICE_PORT = 5001
+    
+    # Configuración JWT específica
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.environ.get('JWT_ACCESS_TOKEN_EXPIRES', 3600))  # 1 hora
+    JWT_REFRESH_TOKEN_EXPIRES = int(os.environ.get('JWT_REFRESH_TOKEN_EXPIRES', 2592000))  # 30 días
+
+class DevelopmentConfig(Config):
+    """Configuración de desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración de producción"""
+    DEBUG = False
+
+# Configuración por defecto
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'default': DevelopmentConfig
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\requirements.txt
+================================================================================
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+psycopg2-binary==2.9.1
+Werkzeug==2.0.1 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\tests\test_auth.py
+================================================================================
+import unittest
+from flask import json
+from Admin_Kiosk3_Backend.auth_service.app import app
+from Admin_Kiosk3_Backend.auth_service.models import db, User
+from Admin_Kiosk3_Backend.common.config import Config
+
+class AuthTestCase(unittest.TestCase):
+    def setUp(self):
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        self.db = db
+        
+        # Crear tablas y usuario de prueba
+        with app.app_context():
+            db.create_all()
+            test_user = User(username='test_user', email='test@test.com')
+            test_user.set_password('test_password')
+            test_user.role = 'user'
+            db.session.add(test_user)
+            db.session.commit()
+    
+    def tearDown(self):
+        with app.app_context():
+            db.session.remove()
+            db.drop_all()
+    
+    def test_login(self):
+        """Test de login exitoso"""
+        response = self.app.post('/auth/login',
+            json={'username': 'test_user', 'password': 'test_password'})
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertIn('token', data)
+        self.assertEqual(data['user']['username'], 'test_user')
+
+    def test_register(self):
+        """Test de registro de usuario"""
+        response = self.app.post('/auth/register',
+            json={
+                'username': 'new_user',
+                'password': 'new_password',
+                'email': 'new@test.com'
+            })
+        self.assertEqual(response.status_code, 201)
+        data = json.loads(response.data)
+        self.assertIn('message', data)
+        self.assertIn('new_user', data['message'])
+
+if __name__ == '__main__':
+    unittest.main() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\auth_service\tests\__init__.py
+================================================================================
+ 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\utils.py
+================================================================================
+import uuid
+from datetime import datetime
+
+def generate_id():
+    """Generar ID único"""
+    return str(uuid.uuid4())
+
+def format_timestamp(dt):
+    """Formatear timestamp para respuestas API"""
+    if not dt:
+        return None
+    return dt.isoformat()
+
+def validate_data(data, required_fields):
+    """Validar campos requeridos en datos"""
+    if not data:
+        return False
+    return all(field in data for field in required_fields)
+
+def format_response(data, status_code=200):
+    """Formatear respuesta API"""
+    return {
+        'data': data,
+        'timestamp': datetime.utcnow().isoformat(),
+        'status': status_code
+    } 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\config.py
+================================================================================
+import os
+
+class Config:
+    """Configuración base compartida"""
+    # Configuración de base de datos
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'postgresql://user:password@db:5432/admin_kiosk3')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    
+    # Configuración de JWT
+    JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'super-secret-key')
+    
+    # Configuración de Redis (para cache/websockets)
+    REDIS_URL = os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+
+def init_app(app):
+    """Inicializar configuración en la app Flask"""
+    app.config.from_object(Config)
+
+def get_config():
+    """Obtener configuración según entorno"""
+    env = os.environ.get('FLASK_ENV', 'development')
+    if env == 'production':
+        return ProductionConfig()
+    return DevelopmentConfig()
+
+class DevelopmentConfig(Config):
+    """Configuración para desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración para producción"""
+    DEBUG = False 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\security\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\security\jwt_auth.py
+================================================================================
+from flask_jwt_extended import create_access_token, verify_jwt_in_request, get_jwt
+from functools import wraps
+from flask import jsonify
+
+def generate_token(user_id, additional_claims=None):
+    """Generar token JWT"""
+    if additional_claims is None:
+        additional_claims = {}
+    return create_access_token(identity=user_id, additional_claims=additional_claims)
+
+def verify_token():
+    """Verificar token JWT"""
+    verify_jwt_in_request()
+    return get_jwt()
+
+def admin_required():
+    """Decorador para rutas que requieren rol admin"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") != "admin":
+                return jsonify({"message": "Se requiere rol de administrador"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\logging\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\common\logging\logger.py
+================================================================================
+import logging
+import sys
+import json
+import os
+from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from Admin_Kiosk3_Backend.common.config import Config
+
+# Configurar logger para Admin_Kiosk3_Backend
+logger = logging.getLogger('Admin_Kiosk3_Backend')
+logger.setLevel(logging.INFO)
+
+# Handler para stdout
+handler = logging.StreamHandler(sys.stdout)
+
+# Formato JSON para logs estructurados
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'level': record.levelname,
+            'message': record.getMessage(),
+            'service': 'Admin_Kiosk3_Backend.' + record.module
+        }
+        if hasattr(record, 'request_id'):
+            log_record['request_id'] = record.request_id
+        return json.dumps(log_record)
+
+handler.setFormatter(JsonFormatter())
+logger.addHandler(handler)
+
+def get_logger(name=None):
+    """Obtener logger configurado"""
+    return logger.getChild(name) if name else logger
+
+def setup_logger(name):
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # Handler para stdout
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setFormatter(formatter)
+    logger.addHandler(stdout_handler)
+    
+    return logger 
+
+================================================================================
+File: Admin_Kiosk3_Backend\docs\api.md
+================================================================================
+# Documentación de APIs
+
+## Auth Service (Puerto 5001)
+### POST /auth/login
+Login de usuario
+- Request: `{"username": "string", "password": "string"}`
+- Response: `{"token": "string"}`
+
+### POST /auth/register
+Registro de usuario
+- Request: `{"username": "string", "password": "string", "email": "string"}`
+- Response: `{"message": "Usuario registrado"}`
+
+## Kiosk Service (Puerto 5002)
+### GET /kiosks
+Listar kioskos
+- Response: `[{"id": int, "name": "string", "location": "string"}]`
+
+### POST /kiosks
+Crear kiosko
+- Request: `{"name": "string", "location": "string"}`
+- Response: `{"id": int, "message": "Kiosko creado"}`
+
+[Continuar con los demás endpoints...] 
+
+================================================================================
+File: Admin_Kiosk3_Backend\docs\architecture.md
+================================================================================
+# Arquitectura del Sistema Admin Kiosk 3
+
+## Visión General
+Sistema de gestión de kioscos interactivos basado en microservicios, diseñado para alta disponibilidad y escalabilidad.
+
+## Microservicios
+1. Auth Service (Puerto 5001)
+2. Kiosk Service (Puerto 5002)
+3. Payment Service (Puerto 5003)
+4. AI Service (Puerto 5004)
+5. WebSocket Service (Puerto 5005)
+6. Notification Service (Puerto 5006)
+
+## Tecnologías
+- Backend: Python/Flask
+- Base de datos: PostgreSQL
+- Cache: Redis
+- Mensajería: WebSockets
+- Contenedores: Docker/Kubernetes 
+
+================================================================================
+File: Admin_Kiosk3_Backend\docs\api_reference.md
+================================================================================
+# API Reference
+
+## Auth Service (5001)
+### POST /auth/login
+Login de usuario
+- Request: { "username": string, "password": string }
+- Response: { "token": string }
+
+### POST /auth/register
+Registro de nuevo usuario
+- Request: { "username": string, "password": string, "email": string }
+- Response: { "id": int, "username": string }
+
+## Kiosk Service (5002)
+### GET /kiosks
+Lista todos los kioscos
+- Response: [{ "id": int, "name": string, "status": string }]
+
+### POST /kiosks
+Crea nuevo kiosko
+- Request: { "name": string, "location": string }
+- Response: { "id": int, "name": string }
+
+## Payment Service (5003)
+### POST /payments
+Procesa un pago
+- Request: { "amount": float, "method": string }
+- Response: { "id": int, "status": string } 
+
+================================================================================
+File: Admin_Kiosk3_Backend\docs\readme_frontend.md
+================================================================================
+# Admin Kiosk 3 Frontend
+
+## Requisitos
+- Node.js 16+
+- npm/yarn
+
+## Instalación
+1. Clonar el repositorio
+2. `npm install`
+3. `npm run dev`
+
+## Estructura
+- /src/components - Componentes reutilizables
+- /src/pages - Páginas de la aplicación
+- /src/services - Servicios de API
+- /src/store - Estado global (Redux)
+
+## Scripts
+- `npm run dev` - Desarrollo
+- `npm run build` - Producción
+- `npm run test` - Tests 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\docker-compose.yml
+================================================================================
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: admin_kiosk3
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Redis para cache y mensajería
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+
+  # API Gateway
+  gateway:
+    build: ./api_gateway
+    ports:
+      - "80:80"
+    depends_on:
+      - auth
+      - kiosk
+      - payment
+      - ai
+      - websocket
+      - notification
+
+  # Servicios
+  auth:
+    build: ./auth_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  kiosk:
+    build: ./kiosk_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  payment:
+    build: ./payment_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  ai:
+    build: ./ai_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+  websocket:
+    build: ./websocket_service
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+
+  notification:
+    build: ./notification_service
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/admin_kiosk3
+      - REDIS_URL=redis://redis:6379/0
+
+volumes:
+  postgres_data: 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\auth-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-deployment
+  labels:
+    app: auth
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+      - name: auth
+        image: admin-kiosk3/auth:latest
+        ports:
+        - containerPort: 5001
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\auth-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+spec:
+  selector:
+    app: auth
+  ports:
+    - protocol: TCP
+      port: 5001
+      targetPort: 5001
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\kiosk-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kiosk-deployment
+  labels:
+    app: kiosk
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kiosk
+  template:
+    metadata:
+      labels:
+        app: kiosk
+    spec:
+      containers:
+      - name: kiosk
+        image: admin-kiosk3/kiosk:latest
+        ports:
+        - containerPort: 5002
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\kiosk-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: kiosk-service
+spec:
+  selector:
+    app: kiosk
+  ports:
+    - protocol: TCP
+      port: 5002
+      targetPort: 5002
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\payment-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-deployment
+  labels:
+    app: payment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+    spec:
+      containers:
+      - name: payment
+        image: admin-kiosk3/payment:latest
+        ports:
+        - containerPort: 5003
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\payment-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+spec:
+  selector:
+    app: payment
+  ports:
+    - protocol: TCP
+      port: 5003
+      targetPort: 5003
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\ai-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-deployment
+  labels:
+    app: ai
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai
+  template:
+    metadata:
+      labels:
+        app: ai
+    spec:
+      containers:
+      - name: ai
+        image: admin-kiosk3/ai:latest
+        ports:
+        - containerPort: 5004
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\ai-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-service
+spec:
+  selector:
+    app: ai
+  ports:
+    - protocol: TCP
+      port: 5004
+      targetPort: 5004
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\websocket-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: websocket-deployment
+  labels:
+    app: websocket
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: websocket
+  template:
+    metadata:
+      labels:
+        app: websocket
+    spec:
+      containers:
+      - name: websocket
+        image: admin-kiosk3/websocket:latest
+        ports:
+        - containerPort: 5005
+        env:
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\websocket-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: websocket-service
+spec:
+  selector:
+    app: websocket
+  ports:
+    - protocol: TCP
+      port: 5005
+      targetPort: 5005
+  type: LoadBalancer 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\notification-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-deployment
+  labels:
+    app: notification
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: notification
+  template:
+    metadata:
+      labels:
+        app: notification
+    spec:
+      containers:
+      - name: notification
+        image: admin-kiosk3/notification:latest
+        ports:
+        - containerPort: 5006
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DATABASE_URL
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: REDIS_URL 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\notification-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+spec:
+  selector:
+    app: notification
+  ports:
+    - protocol: TCP
+      port: 5006
+      targetPort: 5006
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\configmap.yaml
+================================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  # Base de datos
+  DATABASE_URL: "postgresql://user:password@postgres:5432/admin_kiosk3"
+  
+  # Redis
+  REDIS_URL: "redis://redis:6379/0"
+  
+  # JWT
+  JWT_SECRET_KEY: "super-secret-key"
+  
+  # Entorno
+  FLASK_ENV: "production"
+  FLASK_DEBUG: "0"
+  
+  # Puertos de servicios
+  AUTH_SERVICE_PORT: "5001"
+  KIOSK_SERVICE_PORT: "5002"
+  PAYMENT_SERVICE_PORT: "5003"
+  AI_SERVICE_PORT: "5004"
+  WEBSOCKET_SERVICE_PORT: "5005"
+  NOTIFICATION_SERVICE_PORT: "5006" 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\api-gateway-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  labels:
+    app: api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+      - name: api-gateway
+        image: admin-kiosk3/api-gateway:latest
+        ports:
+        - containerPort: 80 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\api-gateway-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: LoadBalancer 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\redis-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:6.2-alpine
+        ports:
+        - containerPort: 6379 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\redis-service.yaml
+================================================================================
+ 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\monitoring\prometheus-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.30.3
+        ports:
+        - containerPort: 9090
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\monitoring\prometheus-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - protocol: TCP
+      port: 9090
+      targetPort: 9090
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\monitoring\grafana-deployment.yaml
+================================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:8.2.0
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "admin"
+        - name: GF_USERS_ALLOW_SIGN_UP
+          value: "false" 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\monitoring\prometheus-config.yaml
+================================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+    scrape_configs:
+      - job_name: 'kubernetes-services'
+        kubernetes_sd_configs:
+          - role: service
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\monitoring\grafana-service.yaml
+================================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  selector:
+    app: grafana
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP 
+
+================================================================================
+File: Admin_Kiosk3_Backend\infra\kubernetes\monitoring\alerts.yaml
+================================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: monitoring-alerts
+  namespace: monitoring
+spec:
+  groups:
+  - name: kiosk-alerts
+    rules:
+    - alert: KioskDown
+      expr: up{job="kiosk"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Kiosk is down"
+        description: "Kiosk {{ $labels.instance }} has been down for more than 5 minutes"
+    - alert: HighLatency
+      expr: http_request_duration_seconds{quantile="0.9"} > 2
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High latency detected"
+        description: "90th percentile latency is above 2 seconds for {{ $labels.service }}" 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\app.py
+================================================================================
+import os, uuid
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://user:password@db:5432/admin_kiosk3')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-key')
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+
+# Modelo de Kiosko
+class Kiosk(db.Model):
+    __tablename__ = 'kiosks'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(100), unique=True, nullable=False)  # Código QR o identificador único del kiosko
+    name = db.Column(db.String(100), nullable=True)
+    location = db.Column(db.String(100), nullable=True)
+    assigned_to = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # usuario/admin asignado (opcional)
+
+# Crear tabla de kioskos
+with app.app_context():
+    db.create_all()
+
+@app.route('/kiosks', methods=['POST'])
+@jwt_required()
+def create_kiosk():
+    """Registrar un nuevo kiosko (genera un código QR único)"""
+    current_user = get_jwt_identity()
+    data = request.get_json() or {}
+    # Generar un código único para el kiosko (por ejemplo UUID)
+    kiosk_code = data.get('code') or str(uuid.uuid4())
+    name = data.get('name', '')
+    location = data.get('location', '')
+    # Crear y guardar el kiosko
+    kiosk = Kiosk(code=kiosk_code, name=name, location=location, assigned_to=None)
+    db.session.add(kiosk)
+    db.session.commit()
+    return jsonify({'message': 'Kiosko creado', 'kiosk': {'id': kiosk.id, 'code': kiosk.code}}), 201
+
+@app.route('/kiosks/<int:kiosk_id>', methods=['GET'])
+@jwt_required()
+def get_kiosk(kiosk_id):
+    """Obtener información de un kiosko por ID"""
+    kiosk = Kiosk.query.get_or_404(kiosk_id)
+    result = {'id': kiosk.id, 'code': kiosk.code, 'name': kiosk.name, 'location': kiosk.location, 'assigned_to': kiosk.assigned_to}
+    return jsonify(result), 200
+
+@app.route('/kiosks/assign', methods=['POST'])
+@jwt_required()
+def assign_kiosk():
+    """Asignar un kiosko a un usuario (p. ej., al escanear un código QR)"""
+    current_user = get_jwt_identity()
+    data = request.get_json()
+    if not data or not data.get('code'):
+        return jsonify({'message': 'Código de kiosko no proporcionado'}), 400
+    kiosk = Kiosk.query.filter_by(code=data['code']).first()
+    if not kiosk:
+        return jsonify({'message': 'Kiosko no encontrado'}), 404
+    # Asignar el kiosko al usuario actual (o podría ser a otra entidad según roles)
+    kiosk.assigned_to = current_user
+    db.session.commit()
+    return jsonify({'message': f'Kiosko {kiosk.code} asignado al usuario {current_user}'}), 200
+
+@app.route('/kiosks', methods=['GET'])
+@jwt_required()
+def list_kiosks():
+    """Listar todos los kioskos (o los asignados al usuario actual, según rol)"""
+    kiosks = Kiosk.query.all()
+    result = []
+    for k in kiosks:
+        result.append({
+            'id': k.id, 'code': k.code, 'name': k.name,
+            'location': k.location, 'assigned_to': k.assigned_to
+        })
+    return jsonify(result), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5002) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\models.py
+================================================================================
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()
+
+class Kiosk(db.Model):
+    __tablename__ = 'kiosks'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(100), unique=True, nullable=False)  # Código QR o identificador único del kiosko
+    name = db.Column(db.String(100), nullable=True)
+    location = db.Column(db.String(100), nullable=True)
+    assigned_to = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # usuario/admin asignado (opcional) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\routes.py
+================================================================================
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from .models import Kiosk, db
+import uuid
+
+kiosk_bp = Blueprint('kiosk', __name__)
+
+@kiosk_bp.route('/kiosks', methods=['POST'])
+@jwt_required()
+def create_kiosk():
+    """Registrar un nuevo kiosko (genera un código QR único)"""
+    current_user = get_jwt_identity()
+    data = request.get_json() or {}
+    # Generar un código único para el kiosko (por ejemplo UUID)
+    kiosk_code = data.get('code') or str(uuid.uuid4())
+    name = data.get('name', '')
+    location = data.get('location', '')
+    # Crear y guardar el kiosko
+    kiosk = Kiosk(code=kiosk_code, name=name, location=location, assigned_to=None)
+    db.session.add(kiosk)
+    db.session.commit()
+    return jsonify({'message': 'Kiosko creado', 'kiosk': {'id': kiosk.id, 'code': kiosk.code}}), 201
+
+@kiosk_bp.route('/kiosks/<int:kiosk_id>', methods=['GET'])
+@jwt_required()
+def get_kiosk(kiosk_id):
+    """Obtener información de un kiosko por ID"""
+    kiosk = Kiosk.query.get_or_404(kiosk_id)
+    result = {'id': kiosk.id, 'code': kiosk.code, 'name': kiosk.name, 'location': kiosk.location, 'assigned_to': kiosk.assigned_to}
+    return jsonify(result), 200
+
+@kiosk_bp.route('/kiosks/assign', methods=['POST'])
+@jwt_required()
+def assign_kiosk():
+    """Asignar un kiosko a un usuario (p. ej., al escanear un código QR)"""
+    current_user = get_jwt_identity()
+    data = request.get_json()
+    if not data or not data.get('code'):
+        return jsonify({'message': 'Código de kiosko no proporcionado'}), 400
+    kiosk = Kiosk.query.filter_by(code=data['code']).first()
+    if not kiosk:
+        return jsonify({'message': 'Kiosko no encontrado'}), 404
+    # Asignar el kiosko al usuario actual (o podría ser a otra entidad según roles)
+    kiosk.assigned_to = current_user
+    db.session.commit()
+    return jsonify({'message': f'Kiosko {kiosk.code} asignado al usuario {current_user}'}), 200
+
+@kiosk_bp.route('/kiosks', methods=['GET'])
+@jwt_required()
+def list_kiosks():
+    """Listar todos los kioskos (o los asignados al usuario actual, según rol)"""
+    kiosks = Kiosk.query.all()
+    result = []
+    for k in kiosks:
+        result.append({
+            'id': k.id, 'code': k.code, 'name': k.name,
+            'location': k.location, 'assigned_to': k.assigned_to
+        })
+    return jsonify(result), 200 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\services.py
+================================================================================
+from .models import Kiosk, db
+import uuid
+
+def create_kiosk(name, location, code=None):
+    """Crear un nuevo kiosko"""
+    kiosk_code = code or str(uuid.uuid4())
+    kiosk = Kiosk(code=kiosk_code, name=name, location=location)
+    db.session.add(kiosk)
+    db.session.commit()
+    return kiosk
+
+def assign_kiosk_to_user(kiosk_code, user_id):
+    """Asignar un kiosko a un usuario"""
+    kiosk = Kiosk.query.filter_by(code=kiosk_code).first()
+    if kiosk:
+        kiosk.assigned_to = user_id
+        db.session.commit()
+        return True
+    return False 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\middleware.py
+================================================================================
+from functools import wraps
+from flask import request, jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
+
+def kiosk_access_required():
+    """Decorador para rutas que requieren acceso a kioskos"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") not in ["admin", "kiosk_manager"]:
+                return jsonify({"msg": "Acceso denegado"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\config.py
+================================================================================
+import os
+from Admin_Kiosk3_Backend.common.config import Config as BaseConfig
+
+class Config(BaseConfig):
+    """Configuración específica del servicio de kioskos"""
+    SERVICE_NAME = 'kiosk_service'
+    SERVICE_PORT = 5002
+    
+    # Configuraciones específicas de kioskos
+    KIOSK_QR_EXPIRY = int(os.environ.get('KIOSK_QR_EXPIRY', 3600))  # 1 hora
+    KIOSK_ASSIGNMENT_TIMEOUT = int(os.environ.get('KIOSK_ASSIGNMENT_TIMEOUT', 86400))  # 24 horas
+
+class DevelopmentConfig(Config):
+    """Configuración de desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración de producción"""
+    DEBUG = False
+
+# Configuración por defecto
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'default': DevelopmentConfig
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\requirements.txt
+================================================================================
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+psycopg2-binary==2.9.1
+uuid==1.30 
+
+================================================================================
+File: Admin_Kiosk3_Backend\kiosk_service\tests\test_kiosk.py
+================================================================================
+import unittest
+from flask import json
+from Admin_Kiosk3_Backend.kiosk_service.app import app
+from Admin_Kiosk3_Backend.kiosk_service.models import db, Kiosk
+
+class KioskTestCase(unittest.TestCase):
+    def setUp(self):
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        self.db = db
+        
+        # Crear tablas y kiosko de prueba
+        with app.app_context():
+            db.create_all()
+            test_kiosk = Kiosk(code='TEST001', name='Test Kiosk', location='Test Location')
+            db.session.add(test_kiosk)
+            db.session.commit()
+    
+    def tearDown(self):
+        with app.app_context():
+            db.session.remove()
+            db.drop_all()
+    
+    def test_get_kiosk(self):
+        """Test obtener información de kiosko"""
+        response = self.app.get('/kiosks/1')  # ID del kiosko de prueba
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertEqual(data['code'], 'TEST001')
+
+if __name__ == '__main__':
+    unittest.main() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\app.py
+================================================================================
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, jwt_required
+from Admin_Kiosk3_Backend.common.config import Config
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.notification_service.models import Notification, db
+import os
+from celery import Celery
+
+app = Flask(__name__)
+Config.init_app(app)
+jwt = JWTManager(app)
+log = get_logger('notification_service')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'postgresql://user:password@db:5432/admin_kiosk3')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'super-secret-key')
+
+# Configuración de Celery para tareas asíncronas
+celery = Celery(
+    'notification_service',
+    broker=os.environ.get('REDIS_URL', 'redis://redis:6379/0')
+)
+
+db = SQLAlchemy(app)
+
+@app.route('/notify/email', methods=['POST'])
+@jwt_required()
+def send_email():
+    """Enviar notificación por email"""
+    data = request.get_json()
+    if not data or not data.get('to') or not data.get('subject'):
+        return jsonify({'message': 'Datos incompletos'}), 400
+    
+    # Encolar tarea de envío de email
+    send_email_task.delay(
+        to=data['to'],
+        subject=data['subject'],
+        body=data.get('body', '')
+    )
+    return jsonify({'message': 'Email encolado para envío'}), 202
+
+@celery.task
+def send_email_task(to, subject, body):
+    """Tarea Celery para envío asíncrono de email"""
+    try:
+        # Aquí iría la lógica real de envío de email (e.g., usando SMTP)
+        print(f"Enviando email a {to}: {subject}")
+        return True
+    except Exception as e:
+        print(f"Error enviando email: {str(e)}")
+        return False
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5006) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\models.py
+================================================================================
+from flask_sqlalchemy import SQLAlchemy
+from Admin_Kiosk3_Backend.common.utils import format_timestamp
+import datetime
+
+db = SQLAlchemy()
+
+class Notification(db.Model):
+    __tablename__ = 'notifications'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # email, sms, push, etc.
+    content = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), default='pending')  # pending, sent, failed
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    sent_at = db.Column(db.DateTime)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'type': self.type,
+            'content': self.content,
+            'status': self.status,
+            'created_at': format_timestamp(self.created_at),
+            'sent_at': format_timestamp(self.sent_at)
+        } 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\routes.py
+================================================================================
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from .models import Notification, db
+from .services import send_notification
+
+notification_bp = Blueprint('notification', __name__)
+
+@notification_bp.route('/email', methods=['POST'])
+@jwt_required()
+def send_email():
+    """Enviar notificación por email"""
+    data = request.get_json()
+    if not data or not data.get('to') or not data.get('subject'):
+        return jsonify({'message': 'Datos incompletos'}), 400
+    
+    notification = Notification(
+        user_id=get_jwt_identity(),
+        type='email',
+        content=f"To: {data['to']}\nSubject: {data['subject']}\nBody: {data.get('body', '')}"
+    )
+    db.session.add(notification)
+    db.session.commit()
+    
+    # Encolar tarea asíncrona
+    send_notification.delay(notification.id)
+    return jsonify({'message': 'Notificación encolada', 'id': notification.id}), 202 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\services.py
+================================================================================
+from celery import Celery
+from Admin_Kiosk3_Backend.notification_service.models import Notification, db
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+import datetime
+
+log = get_logger('notification_service')
+celery = Celery('notification_service', broker='redis://redis:6379/0')
+
+@celery.task
+def send_notification(notification_id):
+    """Tarea Celery para enviar notificación"""
+    notification = Notification.query.get(notification_id)
+    if not notification:
+        log.error(f"Notificación no encontrada: {notification_id}")
+        return False
+    
+    try:
+        # Aquí iría la lógica real de envío según el tipo
+        # (email -> SMTP, SMS -> API de proveedor, etc.)
+        log.info(f"Enviando notificación {notification.id}: {notification.content}")
+        
+        notification.status = 'sent'
+        notification.sent_at = datetime.datetime.utcnow()
+        db.session.commit()
+        return True
+    except Exception as e:
+        notification.status = 'failed'
+        db.session.commit()
+        log.error(f"Error enviando notificación: {str(e)}")
+        return False 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\middleware.py
+================================================================================
+from functools import wraps
+from flask import request, jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
+
+def notification_access_required():
+    """Decorador para rutas que requieren acceso a notificaciones"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") not in ["admin", "notification_manager"]:
+                return jsonify({"msg": "Acceso denegado"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\config.py
+================================================================================
+import os
+from Admin_Kiosk3_Backend.common.config import Config as BaseConfig
+
+class Config(BaseConfig):
+    """Configuración específica del servicio de notificaciones"""
+    SERVICE_NAME = 'notification_service'
+    SERVICE_PORT = 5006
+    
+    # Configuraciones específicas de notificaciones
+    EMAIL_RETRY_ATTEMPTS = int(os.environ.get('EMAIL_RETRY_ATTEMPTS', 3))
+    EMAIL_RETRY_DELAY = int(os.environ.get('EMAIL_RETRY_DELAY', 300))  # 5 minutos
+    SMTP_HOST = os.environ.get('SMTP_HOST', 'smtp.gmail.com')
+    SMTP_PORT = int(os.environ.get('SMTP_PORT', 587))
+
+class DevelopmentConfig(Config):
+    """Configuración de desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración de producción"""
+    DEBUG = False
+
+# Configuración por defecto
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'default': DevelopmentConfig
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\requirements.txt
+================================================================================
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+psycopg2-binary==2.9.1
+celery==5.1.2
+redis==3.5.3
+flower==1.0.0 
+
+================================================================================
+File: Admin_Kiosk3_Backend\notification_service\tests\test_notification.py
+================================================================================
+import unittest
+from flask import json
+from Admin_Kiosk3_Backend.notification_service.app import app
+from Admin_Kiosk3_Backend.notification_service.models import db, Notification
+import datetime
+
+class NotificationTestCase(unittest.TestCase):
+    def setUp(self):
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        self.db = db
+        
+        # Crear tablas y notificación de prueba
+        with app.app_context():
+            db.create_all()
+            test_notification = Notification(
+                user_id=1,
+                type='email',
+                content='Test notification content',
+                status='pending'
+            )
+            db.session.add(test_notification)
+            db.session.commit()
+    
+    def tearDown(self):
+        with app.app_context():
+            db.session.remove()
+            db.drop_all()
+    
+    def test_send_notification(self):
+        """Test de envío de notificación"""
+        response = self.app.post('/notify/email',
+            json={
+                'to': 'test@example.com',
+                'subject': 'Test Subject',
+                'body': 'Test Body'
+            })
+        self.assertEqual(response.status_code, 202)
+        data = json.loads(response.data)
+        self.assertIn('message', data)
+
+if __name__ == '__main__':
+    unittest.main() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\__init__.py
+================================================================================
+# Archivo vacío para marcar el directorio como paquete Python 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\app.py
+================================================================================
+import os, datetime
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+from Admin_Kiosk3_Backend.common.config import Config
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from Admin_Kiosk3_Backend.payment_service.models import Payment, db
+
+# (Opcional: integración con notificaciones/Celery)
+# from celery import Celery
+# celery = Celery(broker=os.environ.get('REDIS_URL', 'redis://redis:6379/0'))
+
+app = Flask(__name__)
+Config.init_app(app)
+jwt = JWTManager(app)
+log = get_logger('payment_service')
+
+# Modelo de Pago/Transacción
+class Payment(db.Model):
+    __tablename__ = 'payments'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)      # ID del usuario que realizó el pago
+    kiosk_id = db.Column(db.Integer, nullable=False)     # ID del kiosko donde se realizó
+    amount = db.Column(db.Numeric(10,2), nullable=False) # Monto del pago
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    status = db.Column(db.String(20), default='completed')  # estado del pago (completed, pending, etc.)
+
+with app.app_context():
+    db.create_all()
+
+@app.route('/payments', methods=['POST'])
+@jwt_required()
+def create_payment():
+    """Registrar un nuevo pago (p. ej., transacción realizada en un kiosko)"""
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    # Validar datos requeridos
+    if not data.get('kiosk_id') or not data.get('amount'):
+        return jsonify({'message': 'Faltan datos de la transacción'}), 400
+    # Crear el registro de pago
+    payment = Payment(user_id=user_id, kiosk_id=data['kiosk_id'], amount=data['amount'])
+    db.session.add(payment)
+    db.session.commit()
+    # Opcional: desencadenar notificación asíncrona (email/SMS) y evento en WebSocket
+    # notify_payment.delay(payment.id)  # Ejemplo: llamar tarea Celery (definida en notification_service)
+    # socketio.emit('payment_update', { ... }, broadcast=True)  # Ejemplo: emitir evento en tiempo real
+    return jsonify({
+        'message': 'Pago registrado',
+        'payment': {'id': payment.id, 'amount': str(payment.amount), 'kiosk_id': payment.kiosk_id, 'status': payment.status}
+    }), 201
+
+@app.route('/payments', methods=['GET'])
+@jwt_required()
+def list_payments():
+    """Listar pagos (opción: filtrar por usuario actual o por rol administrador)"""
+    current_user = get_jwt_identity()
+    # Ejemplo: si no es admin, filtrar por usuario actual
+    payments_query = Payment.query
+    # (Podríamos usar claims de JWT para verificar si es admin y no filtrar)
+    payments = payments_query.filter_by(user_id=current_user).all()
+    result = []
+    for p in payments:
+        result.append({
+            'id': p.id, 'user_id': p.user_id, 'kiosk_id': p.kiosk_id,
+            'amount': str(p.amount), 'timestamp': p.timestamp.isoformat(), 'status': p.status
+        })
+    return jsonify(result), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5003) 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\models.py
+================================================================================
+from flask_sqlalchemy import SQLAlchemy
+from Admin_Kiosk3_Backend.common.utils import format_timestamp
+import datetime
+
+db = SQLAlchemy()
+
+class Payment(db.Model):
+    __tablename__ = 'payments'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)      # ID del usuario que realizó el pago
+    kiosk_id = db.Column(db.Integer, nullable=False)     # ID del kiosko donde se realizó
+    amount = db.Column(db.Numeric(10,2), nullable=False) # Monto del pago
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    status = db.Column(db.String(20), default='completed')  # estado del pago (completed, pending, etc.)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'kiosk_id': self.kiosk_id,
+            'amount': str(self.amount),
+            'timestamp': format_timestamp(self.timestamp),
+            'status': self.status
+        } 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\routes.py
+================================================================================
+from flask import Blueprint, request, jsonify
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from .models import Payment, db
+
+payment_bp = Blueprint('payment', __name__)
+
+@payment_bp.route('/payments', methods=['POST'])
+@jwt_required()
+def create_payment():
+    """Registrar un nuevo pago (p. ej., transacción realizada en un kiosko)"""
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    # Validar datos requeridos
+    if not data.get('kiosk_id') or not data.get('amount'):
+        return jsonify({'message': 'Faltan datos de la transacción'}), 400
+    # Crear el registro de pago
+    payment = Payment(user_id=user_id, kiosk_id=data['kiosk_id'], amount=data['amount'])
+    db.session.add(payment)
+    db.session.commit()
+    return jsonify({
+        'message': 'Pago registrado',
+        'payment': {'id': payment.id, 'amount': str(payment.amount), 'kiosk_id': payment.kiosk_id, 'status': payment.status}
+    }), 201
+
+@payment_bp.route('/payments', methods=['GET'])
+@jwt_required()
+def list_payments():
+    """Listar pagos (opción: filtrar por usuario actual o por rol administrador)"""
+    current_user = get_jwt_identity()
+    payments = Payment.query.filter_by(user_id=current_user).all()
+    result = []
+    for p in payments:
+        result.append({
+            'id': p.id, 'user_id': p.user_id, 'kiosk_id': p.kiosk_id,
+            'amount': str(p.amount), 'timestamp': p.timestamp.isoformat(), 'status': p.status
+        })
+    return jsonify(result), 200 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\services.py
+================================================================================
+from Admin_Kiosk3_Backend.payment_service.models import Payment, db
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from decimal import Decimal
+
+log = get_logger('payment_service')
+
+def create_payment_record(user_id: int, kiosk_id: int, amount: Decimal) -> Payment:
+    """Crear un nuevo registro de pago"""
+    payment = Payment(user_id=user_id, kiosk_id=kiosk_id, amount=amount)
+    db.session.add(payment)
+    db.session.commit()
+    log.info(f"Pago creado: {payment.id}")
+    return payment
+
+def get_user_payments(user_id: int) -> list:
+    """Obtener todos los pagos de un usuario"""
+    return Payment.query.filter_by(user_id=user_id).all() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\middleware.py
+================================================================================
+from functools import wraps
+from flask import request, jsonify
+from flask_jwt_extended import verify_jwt_in_request, get_jwt
+
+def payment_access_required():
+    """Decorador para rutas que requieren acceso a pagos"""
+    def wrapper(fn):
+        @wraps(fn)
+        def decorator(*args, **kwargs):
+            verify_jwt_in_request()
+            claims = get_jwt()
+            if claims.get("role") not in ["admin", "payment_manager"]:
+                return jsonify({"msg": "Acceso denegado"}), 403
+            return fn(*args, **kwargs)
+        return decorator
+    return wrapper 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\config.py
+================================================================================
+import os
+from Admin_Kiosk3_Backend.common.config import Config as BaseConfig
+
+class Config(BaseConfig):
+    """Configuración específica del servicio de pagos"""
+    SERVICE_NAME = 'payment_service'
+    SERVICE_PORT = 5003
+    
+    # Configuraciones específicas de pagos
+    PAYMENT_TIMEOUT = int(os.environ.get('PAYMENT_TIMEOUT', 300))  # 5 minutos
+    MAX_PAYMENT_AMOUNT = float(os.environ.get('MAX_PAYMENT_AMOUNT', 10000.00))
+
+class DevelopmentConfig(Config):
+    """Configuración de desarrollo"""
+    DEBUG = True
+
+class ProductionConfig(Config):
+    """Configuración de producción"""
+    DEBUG = False
+
+# Configuración por defecto
+config = {
+    'development': DevelopmentConfig,
+    'production': ProductionConfig,
+    'default': DevelopmentConfig
+} 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\requirements.txt
+================================================================================
+Flask==2.0.1
+Flask-SQLAlchemy==2.5.1
+Flask-JWT-Extended==4.3.1
+psycopg2-binary==2.9.1
+celery==5.1.2
+redis==3.5.3 
+
+================================================================================
+File: Admin_Kiosk3_Backend\payment_service\tests\test_payment.py
+================================================================================
+import unittest
+from flask import json
+from Admin_Kiosk3_Backend.payment_service.app import app
+from Admin_Kiosk3_Backend.payment_service.models import db, Payment
+from decimal import Decimal
+
+class PaymentTestCase(unittest.TestCase):
+    def setUp(self):
+        app.config['TESTING'] = True
+        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app = app.test_client()
+        self.db = db
+        
+        # Crear tablas y pago de prueba
+        with app.app_context():
+            db.create_all()
+            test_payment = Payment(
+                user_id=1,
+                kiosk_id=1,
+                amount=Decimal('100.00'),
+                status='completed'
+            )
+            db.session.add(test_payment)
+            db.session.commit()
+    
+    def tearDown(self):
+        with app.app_context():
+            db.session.remove()
+            db.drop_all()
+    
+    def test_get_payment(self):
+        """Test obtener información de pago"""
+        response = self.app.get('/payments/1')  # ID del pago de prueba
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.data)
+        self.assertEqual(data['status'], 'completed')
+
+if __name__ == '__main__':
+    unittest.main() 
+
+================================================================================
+File: Admin_Kiosk3_Backend\.github\workflows\build.yml
+================================================================================
+name: Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Run tests
+      run: |
+        python -m pytest 
+
+================================================================================
+File: Admin_Kiosk3_Backend\.github\workflows\deploy.yml
+================================================================================
+name: Deploy to Production
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build and push Docker images
+      run: |
+        docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+        docker-compose build
+        docker-compose push
+    - name: Deploy to Kubernetes
+      run: |
+        kubectl apply -f infra/kubernetes/ 
+
+================================================================================
+File: Admin_Kiosk3_Backend\.github\workflows\security_scan.yml
+================================================================================
+name: Security Scan
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run security scan
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high 
