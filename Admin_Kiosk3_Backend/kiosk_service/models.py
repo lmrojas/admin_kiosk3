@@ -1,17 +1,17 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from Admin_Kiosk3_Backend.common.utils import format_timestamp
-
-db = SQLAlchemy()
+from Admin_Kiosk3_Backend.common import db
 
 class Kiosk(db.Model):
     """Modelo para los kioskos"""
     __tablename__ = 'kiosks'
+    __table_args__ = {'schema': 'kiosk'}  # Especificar esquema
     
     # Campos principales
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(100), unique=True, nullable=False)  # Código único del kiosko
-    name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), unique=True, nullable=False)
     location = db.Column(db.String(200))
     status = db.Column(db.String(20), default='inactive')  # active, inactive, maintenance
     
@@ -22,7 +22,7 @@ class Kiosk(db.Model):
     
     # Configuración
     config = db.Column(db.JSON)  # Configuración específica del kiosko
-    assigned_to = db.Column(db.Integer, nullable=True)  # ID del usuario asignado
+    assigned_to = db.Column(db.Integer, db.ForeignKey('auth.users.id'), nullable=True)  # ID del usuario asignado
     
     def to_dict(self):
         """Convertir el modelo a diccionario"""
@@ -42,10 +42,11 @@ class Kiosk(db.Model):
 class KioskEvent(db.Model):
     """Modelo para eventos de kioscos"""
     __tablename__ = 'kiosk_events'
+    __table_args__ = {'schema': 'kiosk'}  # Especificar esquema
     
     id = db.Column(db.Integer, primary_key=True)
-    kiosk_id = db.Column(db.Integer, db.ForeignKey('kiosks.id'), nullable=False)
-    event_type = db.Column(db.String(50), nullable=False)  # connection, disconnection, error, etc.
+    kiosk_id = db.Column(db.Integer, db.ForeignKey('kiosk.kiosks.id'), nullable=False)
+    event_type = db.Column(db.String(50), nullable=False)
     description = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     

@@ -1,11 +1,11 @@
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from Admin_Kiosk3_Backend.common.utils import format_timestamp
-
-db = SQLAlchemy()
+from Admin_Kiosk3_Backend.common import db
 
 class User(db.Model):
     __tablename__ = 'users'
+    __table_args__ = {'schema': 'auth'}  # Especificar esquema
     
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -29,6 +29,7 @@ class User(db.Model):
 
 class Role(db.Model):
     __tablename__ = 'roles'
+    __table_args__ = {'schema': 'auth'}  # Especificar esquema
     
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(20), unique=True, nullable=False)

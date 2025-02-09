@@ -1,18 +1,22 @@
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
 from Admin_Kiosk3_Backend.common.utils import format_timestamp
-import datetime
-
-db = SQLAlchemy()
+from Admin_Kiosk3_Backend.common import db
 
 class WebSocketConnection(db.Model):
-    __tablename__ = 'websocket_connections'
+    """Modelo para conexiones WebSocket"""
+    __tablename__ = 'connections'
+    __table_args__ = {'schema': 'ws'}  # Especificar esquema
     
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, nullable=True)
     session_id = db.Column(db.String(100), unique=True, nullable=False)
-    connected_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    status = db.Column(db.String(20), default='active')
+    connected_at = db.Column(db.DateTime, default=datetime.utcnow)
     disconnected_at = db.Column(db.DateTime)
-    status = db.Column(db.String(20), default='active')  # active, disconnected
+    
+    # Referencias con esquemas
+    user_id = db.Column(db.Integer, db.ForeignKey('auth.users.id'), nullable=False)
+    kiosk_id = db.Column(db.Integer, db.ForeignKey('kiosk.kiosks.id'), nullable=True)
     
     def to_dict(self):
         return {
