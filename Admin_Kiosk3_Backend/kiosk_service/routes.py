@@ -1,33 +1,169 @@
+"""
+Rutas del servicio de kiosks según reglas MDC
+"""
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
-from .models import Kiosk, db
-import uuid
+from Admin_Kiosk3_Backend.common.logging.logger import get_logger
+from .services import KioskService
+from .middleware import admin_required, operator_required
+from .config import Config
+from .models import Kiosk
 
 kiosk_bp = Blueprint('kiosk', __name__)
+log = get_logger('kiosk_routes')
 
-@kiosk_bp.route('/kiosks', methods=['POST'])
+@kiosk_bp.route('/create', methods=['POST'])
 @jwt_required()
+@admin_required()
 def create_kiosk():
-    """Registrar un nuevo kiosko (genera un código QR único)"""
-    current_user = get_jwt_identity()
-    data = request.get_json() or {}
-    # Generar un código único para el kiosko (por ejemplo UUID)
-    kiosk_code = data.get('code') or str(uuid.uuid4())
-    name = data.get('name', '')
-    location = data.get('location', '')
-    # Crear y guardar el kiosko
-    kiosk = Kiosk(code=kiosk_code, name=name, location=location, assigned_to=None)
-    db.session.add(kiosk)
-    db.session.commit()
-    return jsonify({'message': 'Kiosko creado', 'kiosk': {'id': kiosk.id, 'code': kiosk.code}}), 201
+    """
+    Crear un nuevo kiosk
+    ---
+    tags:
+      - Kiosks
+    security:
+      - Bearer: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - name
+              - location
+            properties:
+              name:
+                type: string
+              location:
+                type: string
+              ip_address:
+                type: string
+              assigned_user_id:
+                type: integer
+    responses:
+      201:
+        description: Kiosk creado exitosamente
+      400:
+        description: Datos inválidos
+      401:
+        description: No autorizado
+      500:
+        description: Error del servidor
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                'status': 'error',
+                'message': 'No data provided'
+            }), 400
 
-@kiosk_bp.route('/kiosks/<int:kiosk_id>', methods=['GET'])
+        required = ['name', 'location']
+        if not all(field in data for field in required):
+            return jsonify({
+                'status': 'error',
+                'message': f'Required fields: {", ".join(required)}'
+            }), 400
+
+        current_user = get_jwt_identity()
+        result = KioskService.create_kiosk(data, created_by=current_user)
+
+        if result['status'] == 'error':
+            return jsonify(result), 400
+
+        log.info(f"Kiosk created successfully by user {current_user}")
+        return jsonify(result), 201
+
+    except Exception as e:
+        log.error(f"Error creating kiosk: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Internal server error'
+        }), 500
+
+@kiosk_bp.route('/list', methods=['GET'])
+@jwt_required()
+def list_kiosks():
+    """
+    Listar kiosks
+    ---
+    tags:
+      - Kiosks
+    security:
+      - Bearer: []
+    responses:
+      200:
+        description: Lista de kiosks
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [success, error]
+                data:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Kiosk'
+    """
+    try:
+        current_user = get_jwt_identity()
+        log.info(f"Listing kiosks for user {current_user}")
+        
+        result = KioskService.list_kiosks()
+        if result['status'] == 'success' and not isinstance(result['data'], list):
+            result['data'] = [result['data']]
+            
+        return jsonify(result), 200
+        
+    except Exception as e:
+        log.error(f"Error listing kiosks: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Error interno del servidor'
+        }), 500
+
+@kiosk_bp.route('/<int:kiosk_id>', methods=['GET'])
 @jwt_required()
 def get_kiosk(kiosk_id):
-    """Obtener información de un kiosko por ID"""
-    kiosk = Kiosk.query.get_or_404(kiosk_id)
-    result = {'id': kiosk.id, 'code': kiosk.code, 'name': kiosk.name, 'location': kiosk.location, 'assigned_to': kiosk.assigned_to}
-    return jsonify(result), 200
+    """
+    Obtener detalles de un kiosk
+    ---
+    tags:
+      - Kiosks
+    security:
+      - Bearer: []
+    parameters:
+      - in: path
+        name: kiosk_id
+        required: true
+        schema:
+          type: integer
+    responses:
+      200:
+        description: Detalles del kiosk
+      404:
+        description: Kiosk no encontrado
+      401:
+        description: No autorizado
+      500:
+        description: Error del servidor
+    """
+    try:
+        result = KioskService.get_kiosk(kiosk_id)
+        if result['status'] == 'error':
+            return jsonify(result), 404
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        log.error(f"Error getting kiosk {kiosk_id}: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Internal server error'
+        }), 500
 
 @kiosk_bp.route('/kiosks/assign', methods=['POST'])
 @jwt_required()
@@ -43,17 +179,4 @@ def assign_kiosk():
     # Asignar el kiosko al usuario actual (o podría ser a otra entidad según roles)
     kiosk.assigned_to = current_user
     db.session.commit()
-    return jsonify({'message': f'Kiosko {kiosk.code} asignado al usuario {current_user}'}), 200
-
-@kiosk_bp.route('/kiosks', methods=['GET'])
-@jwt_required()
-def list_kiosks():
-    """Listar todos los kioskos (o los asignados al usuario actual, según rol)"""
-    kiosks = Kiosk.query.all()
-    result = []
-    for k in kiosks:
-        result.append({
-            'id': k.id, 'code': k.code, 'name': k.name,
-            'location': k.location, 'assigned_to': k.assigned_to
-        })
-    return jsonify(result), 200 
+    return jsonify({'message': f'Kiosko {kiosk.code} asignado al usuario {current_user}'}), 200 
